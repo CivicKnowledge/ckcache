@@ -1,7 +1,13 @@
-
-
+    
 import os
-from ambry.dbexceptions import ConfigurationError
+import logging
+import sys
+
+class CacheError(Exception):
+    ''''''
+
+class ConfigurationError(CacheError):
+    '''Error in the configuration files'''
 
 def new_cache(config, root_dir='no_root_dir', run_config=None):
         """Return a new :class:`FsCache` built on the configured cache directory
@@ -68,7 +74,6 @@ def new_cache(config, root_dir='no_root_dir', run_config=None):
             return  fsclass(**dict(config))
 
 
-
 def parse_cache_string(remote, root_dir='no_root_dir'):
     import urlparse
 
@@ -108,61 +113,9 @@ def parse_cache_string(remote, root_dir='no_root_dir'):
 
     return config
 
-       
-
-class CacheInterface(object):
-
+class Cache(object):
+    
     config = None
-    upstream = None
-
-    def repo_id(self): raise NotImplementedError()
-
-    def path(self, rel_path, propatate = True, **kwargs): raise NotImplementedError()
-
-    def get(self, rel_path, cb=None): raise NotImplementedError()
-    
-    def get_stream(self, rel_path, cb=None):  raise NotImplementedError(type(self))
-
-    def has(self, rel_path, md5=None, propagate=True):  raise NotImplementedError()
-    
-    def put(self, source, rel_path, metadata=None): raise NotImplementedError()
-    
-    def put_stream(self,rel_path, metadata=None, cb=None): raise NotImplementedError()
-
-    def find(self,query): raise NotImplementedError()
-
-    def list(self, path=None, with_metadata=False, include_partitions=False): raise NotImplementedError()
-
-    def remove(self, rel_path, propagate=False): raise NotImplementedError()
-
-    def clean(self):  raise NotImplementedError(type(self))
-
-    def get_upstream(self, type_):
-        '''Return self, or an upstream, that has the given class type.
-        This is typically used to find upstream s that impoement the RemoteInterface
-        ''' 
-
-        if isinstance(self, type_):
-            return self
-        elif self.upstream and isinstance(self.upstream, type_):
-            return self.upstream
-        elif self.upstream:
-            return self.upstream.get_upstream(type_)
-        else:
-            return None
-
-    def last_upstream(self):  raise NotImplementedError(type(self))
-
-    def attach(self, upstream): raise NotImplementedError(type(self))
-
-    def detach(self): raise NotImplementedError(type(self))
-
-    def subcache(self,path):
-        raise NotImplementedError(type(self))
-
-
-class Cache(CacheInterface):
-    
     upstream = None
     readonly = False
     usreadonly = False
@@ -183,7 +136,6 @@ class Cache(CacheInterface):
                 self.upstream = upstream
             else:
                 self.upstream = new_cache(upstream)
-
 
     def clone(self):
         return Cache(upstream=self.upstream, **self.args)
@@ -299,7 +251,6 @@ class Cache(CacheInterface):
 
         from StringIO import StringIO
         import json
-        from ..util import copy_file_or_flo
 
         d = {}
 
@@ -343,6 +294,20 @@ class Cache(CacheInterface):
         return self._priority
 
 
+    def get_upstream(self, type_):
+        '''Return self, or an upstream, that has the given class type.
+        This is typically used to find upstream s that impoement the RemoteInterface
+        '''
+
+        if isinstance(self, type_):
+            return self
+        elif self.upstream and isinstance(self.upstream, type_):
+            return self.upstream
+        elif self.upstream:
+            return self.upstream.get_upstream(type_)
+        else:
+            return None
+
     def last_upstream(self):
         us = self
 
@@ -355,34 +320,7 @@ class Cache(CacheInterface):
         return "{}".format(type(self))
 
 
-
-
-class RemoteMarker(object):
-    pass
-
-class RemoteInterface(CacheInterface, RemoteMarker):
-
-    bucket_name = None #@UnusedVariable
-    prefix = None #@UnusedVariable
-    access_key = None #@UnusedVariable
-    secret_key = None #@UnusedVariable
-
-    @property
-    def connection_info(self):  raise NotImplementedError()
-
-    def find(self, query): raise NotImplementedError()
-
-    def get_ref(self, id_): raise NotImplementedError()
-
-    def last_upstream(self):
-        us = self
-
-        while us.upstream:
-            us = us.upstream
-
-        return us
-
-class NullCache(CacheInterface):
+class NullCache(Cache):
     """A Cache that acts as if it contains nothing"""
 
     def repo_id(self):
@@ -430,8 +368,8 @@ class NullCache(CacheInterface):
     def detach(self):
         pass
 
-# This probably duplicated the functionality of Cache ...
-class PassthroughCache(CacheInterface):
+# This probably duplicates the functionality of Cache ...
+class PassthroughCache(Cache):
     """Pass through operations to the Upstream. Meant to be subclassed for useful behavior """
 
     upstream = None
@@ -484,4 +422,160 @@ class PassthroughCache(CacheInterface):
     def detach(self):
         return self.upstream.detach()
 
+
+class MetadataFlo(object):
+    '''A File like object wrapper that has a slot for storing metadata'''
+
+
+    def __init__(self,o, metadata=None):
+        self.o = o
+
+        if metadata:
+            self.meta = metadata
+        else:
+            self.meta = {}
+
+    def seek(self,offset,whence=0):
+        return self.o.seek(offset,whence)
+
+    def tell(self):
+        return self.o.tell()
+
+    def read(self,size=None):
+        if size:
+            return self.o.read(size)
+        else:
+            return self.o.read()
+
+    def readline(self,size=None):
+        if size:
+            return self.o.readline(size)
+        else:
+            return self.o.readline()
+
+    def readlines(self,size=None):
+        if size:
+            return self.o.readlines(size)
+        else:
+            return self.o.readlines()
+
+    def write(self, d):
+        self.o.write(d)
+
+    def writelines(self, d):
+        self.o.writelines(d)
+
+    def flush(self):
+        return self.o.flush()
+
+    def close(self):
+        return self.o.close()
+
+    @property
+    def closed(self):
+        return self.o.closed
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type_, value, traceback):
+        if type_:
+            return False
+
+        self.close()
+
+
+def copy_file_or_flo(input_, output, buffer_size=64*1024, cb=None):
+    """ Copy a file name or file-like-object to another
+    file name or file-like object"""
+    import shutil
+
+    input_opened = False
+    output_opened = False
+
+    try:
+        if isinstance(input_, basestring):
+
+            if not os.path.isdir(os.path.dirname(input_)):
+                os.makedirs(os.path.dirname(input_))
+
+            input_ = open(input_,'r')
+            input_opened = True
+
+        if isinstance(output, basestring):
+
+            if not os.path.isdir(os.path.dirname(output)):
+                os.makedirs(os.path.dirname(output))
+
+            output = open(output,'wb')
+            output_opened = True
+
+        #shutil.copyfileobj(input_,  output, buffer_size)
+
+        def copyfileobj(fsrc, fdst, length=buffer_size):
+            cumulative = 0
+            while 1:
+                buf = fsrc.read(length)
+                if not buf:
+                    break
+                fdst.write(buf)
+                if cb:
+                    cumulative += len(buf)
+                    cb(len(buf), cumulative)
+
+        copyfileobj(input_, output)
+
+    finally:
+        if input_opened:
+            input_.close()
+
+        if output_opened:
+            output.close()
+
+
+def get_logger(name, file_name = None, stream = None, template=None, propagate = False):
+    """Get a logger by name
+
+    if file_name is specified, and the dirname() of the file_name exists, it will
+    write to that file. If the dirname dies not exist, it will silently ignre it. """
+
+    logger = logging.getLogger(name)
+
+    if propagate is not None:
+        logger.propagate = propagate
+
+
+    for handler in logger.handlers:
+        logger.removeHandler(handler)
+
+    if not template:
+        template = "%(name)s %(process)s %(levelname)s %(message)s"
+
+    formatter = logging.Formatter(template)
+
+    if not file_name and not stream:
+        stream = sys.stdout
+
+    handlers = []
+
+    if stream is not None:
+
+        handlers.append(logging.StreamHandler(stream=stream))
+
+    if file_name is not None:
+
+        if os.path.isdir(os.path.dirname(file_name)):
+            handlers.append(logging.FileHandler(file_name))
+        else:
+            print("ERROR: Can't open log file {}".format(file_name))
+
+
+    for ch in handlers:
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+
+    logger.setLevel(logging.INFO)
+
+
+    return logger
 
