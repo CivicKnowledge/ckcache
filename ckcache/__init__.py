@@ -1,7 +1,19 @@
-    
+"""
+
+Copyright 2014, Civic Knowledge. All Rights Reserved
+"""
 import os
 import logging
 import sys
+
+
+__version__ = 0.1
+__author__ = "Eric Busboom <eric@civicknowledge.com>"
+
+account_files = [
+    '/etc/ambry/accounts.yaml',
+    os.path.expanduser('~/.ambry-accounts.yaml')
+]
 
 class CacheError(Exception):
     ''''''
@@ -9,7 +21,49 @@ class CacheError(Exception):
 class ConfigurationError(CacheError):
     '''Error in the configuration files'''
 
-def new_cache(config, root_dir='no_root_dir', run_config=None):
+class FilesystemError(CacheError):
+    '''Error in the configuration files'''
+
+class NotFoundError(CacheError):
+    '''Object is missing'''
+
+# From https://wiki.python.org/moin/PythonDecoratorLibrary#Memoize
+def memoize(obj):
+    import functools
+    cache = obj.cache = {}
+
+    @functools.wraps(obj)
+    def memoizer(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = obj(*args, **kwargs)
+        return cache[key]
+
+    return memoizer
+
+@memoize
+def accounts():
+    """Load the accounts YAML file and return a dict """
+    import yaml
+
+    for path in account_files:
+        try:
+
+            c_dir = os.path.dirname(path)
+
+            if not os.path.exists(c_dir):
+                os.makedirs(c_dir)
+
+            with open(path, 'rb') as f:
+                return yaml.load(f)['accounts']
+
+        except (OSError, IOError) as e:
+            pass
+
+    return {}
+
+
+def new_cache(config, root_dir='no_root_dir'):
         """Return a new :class:`FsCache` built on the configured cache directory
         """
 
@@ -19,46 +73,36 @@ def new_cache(config, root_dir='no_root_dir', run_config=None):
         if 'size' in config:
             from filesystem import FsLimitedCache
             fsclass = FsLimitedCache
+
+        elif 'bucket' in config:
+            from s3 import S3Cache
+            fsclass = S3Cache
+
         elif 'url' in config:
-            if 'rest' in config['options']:
-                from remote import RestReadCache
-                fsclass = RestReadCache
-            else:
-                from remote import HttpCache
-                fsclass = HttpCache
-        elif 'account' in config:
+            from http import HttpCache
+            fsclass = HttpCache
 
-
-            if isinstance(config['account'], basestring):
-                if not run_config:
-                    raise ConfigurationError("Config has an account, but run_config was not specified to resolve the account")
-
-                config['account'] = run_config.account(config['account'])
-
-
-            if config['account']['service'] == 's3':
-                from s3 import S3Cache
-                fsclass = S3Cache
-            elif config['account']['service'] == 'gcs':
-                from gcs import GcsCache
-                fsclass = GcsCache
-            else:
-                raise ConfigurationError("Unknown account service: {}".format(config['account']['service']))
-                                                                 
         elif 'dir' in config:
             from filesystem import FsCache
             fsclass = FsCache
+
+
         else:
-            
             raise ConfigurationError("Can't determine cache type: {} ".format(config))
 
-
         # Re-write account to get login credentials, if the run_config is available
-        if 'account' in config and run_config :
-            try:
-                config['account'] = run_config.account(config['account'])
-            except TypeError: # config['account'] is already a dict
-                pass
+        if 'account' in config and isinstance(config['account'], basestring):
+
+            acts = accounts()
+
+            if not config['account'] in acts:
+                raise ConfigurationError("Accounts dict does not include account '{}': {} "
+                                         .format(config['account'], acts))
+
+            config['account'] = acts[config['account']]
+
+        if 'upstream' in config:
+            config['upstream'] = new_cache(config['upstream'], root_dir=root_dir)
 
         if 'options' in config and 'compress' in config['options'] :
             # Need to clone the config because we don't want to propagate the changes
@@ -70,22 +114,26 @@ def new_cache(config, root_dir='no_root_dir', run_config=None):
             cc['options'] = [ i for i in config['options'] if i !=  'compress']
             from filesystem import FsCompressionCache
             return FsCompressionCache(upstream=cc)
+
         else:
             return  fsclass(**dict(config))
 
 
-def parse_cache_string(remote, root_dir='no_root_dir'):
+def parse_cache_string(cstr, root_dir='no_root_dir'):
     import urlparse
 
-    remote = remote.format(root=root_dir)
+    # Pass-though if it is already a dict.
+    if isinstance(cstr, dict):
+        return cstr
 
-    parts = urlparse.urlparse(remote)
+    cstr = cstr.format(root=root_dir)
+
+    parts = urlparse.urlparse(cstr)
     config = {}
 
     config['type'] = scheme = parts.scheme if parts.scheme else 'file'
 
     config['options'] = []
-
 
     if scheme == 'file' or not bool(scheme) :
         config['dir'] = parts.path
@@ -120,6 +168,7 @@ class Cache(object):
     readonly = False
     usreadonly = False
     base_priority = 100 # Priority for this class of cache.
+    prefix = None
     _priority = 0
     _prior_upstreams = None
     
@@ -138,7 +187,7 @@ class Cache(object):
                 self.upstream = new_cache(upstream)
 
     def clone(self):
-        return Cache(upstream=self.upstream, **self.args)
+        return self.__class__(upstream=self.upstream, **self.args)
 
     def subcache(self,path):
         """Clone this case, and extend the prefix"""
@@ -191,10 +240,10 @@ class Cache(object):
 
     def put_metadata(self,rel_path, metadata):
         import json
-        
+
         if rel_path.startswith('meta'):
             return
-        
+
         if metadata:
             strm = self.put_stream(os.path.join('meta',rel_path))
             json.dump(metadata, strm)
@@ -423,6 +472,12 @@ class PassthroughCache(Cache):
         return self.upstream.detach()
 
 
+class NullCache(Cache):
+    """A Cache that never has anything in it """
+    def has(self, rel_path, md5=None, propagate=True):
+        return False
+
+
 class MetadataFlo(object):
     '''A File like object wrapper that has a slot for storing metadata'''
 
@@ -483,6 +538,92 @@ class MetadataFlo(object):
             return False
 
         self.close()
+
+
+# from https://github.com/kennethreitz/requests/issues/465
+class FileLikeFromIter(object):
+    def __init__(self, content_iter, cb=None, buffer_size = 128*1024):
+
+        self._iter = content_iter
+        self.data = ''
+        self.time = 0
+        self.prt = 0
+        self.cum = 0
+        self.cb = cb
+        self.buffer_size = buffer_size
+        self.buffer = memoryview(bytearray('\0'*buffer_size))
+        self.buffer_alt = memoryview(bytearray('\0'*buffer_size))
+
+    def __iter__(self):
+        return self._iter
+
+    def x_read(self,n=None):
+
+        if n is None:
+            raise Exception("Can't read from this object without a length")
+
+        while self.prt < n:
+            try:
+                d = self._iter.next()
+                l = len(d)
+                self.buffer[self.prt:(self.prt+l)] = d
+                self.prt += l
+            except StopIteration:
+                break
+
+        if self.prt < n:
+            # Done!
+            d = self.buffer[:self.prt].tobytes()
+            self.buffer_alt = memoryview(bytearray('\0'*self.buffer_size))
+            self.buffer = memoryview(bytearray('\0'*self.buffer_size))
+            self.prt = 0
+            return d
+        else:
+            # Save the excess in the alternate buffer, miving it to the
+            # start so we can append to it next call.
+            self.buffer_alt[0:self.prt - n] = self.buffer[n:self.prt]
+
+            #Swap the buffers, so we start by appending to the excess on the next read
+            self.buffer, self.buffer_alt = self.buffer_alt, self.buffer
+
+            self.prt = self.prt - n
+
+            if self.cb:
+                self.cum += n
+                self.cb(self.cum)
+
+            return self.buffer_alt[0:n].tobytes()
+
+
+    def read(self, n=None):
+
+        if n is None:
+            return self.data + ''.join(l for l in self._iter)
+        else:
+            while len(self.data) < n:
+                try:
+                    self.data = ''.join((self.data, self._iter.next()))
+                except StopIteration:
+                    break
+
+            result, self.data = self.data[:n], self.data[n:]
+
+            self.cum += n
+
+            if self.cb:
+                self.cb(self.cum)
+
+            return result
+
+    def push(self,d):
+        """Push data back in; an alternative to seek"""
+        self.data = d + self.data
+
+    def close(self):
+        self.data = ''
+
+        self._iter.close()
+
 
 
 def copy_file_or_flo(input_, output, buffer_size=64*1024, cb=None):
@@ -578,4 +719,28 @@ def get_logger(name, file_name = None, stream = None, template=None, propagate =
 
 
     return logger
+
+def md5_for_file(f, block_size=2**20):
+    """Generate an MD5 has for a possibly large file by breaking it into chunks"""
+    import hashlib
+
+    md5 = hashlib.md5()
+    try:
+        # Guess that f is a FLO.
+        f.seek(0)
+
+        while True:
+            data = f.read(block_size)
+            if not data:
+                break
+            md5.update(data)
+        return md5.hexdigest()
+
+    except AttributeError as e:
+        # Nope, not a FLO. Maybe string?
+
+        file_name = f
+        with open(file_name, 'rb') as f:
+            return md5_for_file(f, block_size)
+
 

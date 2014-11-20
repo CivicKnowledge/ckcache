@@ -1,11 +1,11 @@
 
 from .  import Cache
-from ..util import copy_file_or_flo, get_logger
+from . import copy_file_or_flo
 import os
 import logging
 
-global_logger = get_logger(__name__)
-#global_logger.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 
 class S3Cache(Cache):
     '''A cache that transfers files to and from an S3 bucket
@@ -176,7 +176,7 @@ class S3Cache(Cache):
         from boto.exception import S3ResponseError 
      
         import StringIO
-        from ..util.flo import MetadataFlo
+        from . import MetadataFlo
 
         b = StringIO.StringIO()
         try:
@@ -257,6 +257,7 @@ class S3Cache(Cache):
         import time
         import threading
 
+
         md5 = metadata.get('md5',None) if metadata else None
 
         # Horrible, but doing it anyway because I can.
@@ -276,17 +277,17 @@ class S3Cache(Cache):
                 while True:
                     mp, part_number, buf = self.queue.get()
                     if mp is None: # Signal to die
-                        global_logger.debug("put_stream: Thread {} exiting".format(self.n))
+                        logger.debug("put_stream: Thread {} exiting".format(self.n))
                         self.queue.task_done()
                         return
-                    global_logger.debug("put_stream: Thread {}: processing part: {}".format(self.n, part_number))
+                    logger.debug("put_stream: Thread {}: processing part: {}".format(self.n, part_number))
                     t1 = time.time()
                     try:
                         mp.upload_part_from_file(buf,part_number  )
                     finally:
                         self.queue.task_done()
                         t2 = time.time()
-                        global_logger.debug("put_stream: Thread {}, part {}. time = {} rate =  {} b/s"
+                        logger.debug("put_stream: Thread {}, part {}. time = {} rate =  {} b/s"
                                      .format(self.n, part_number, round(t2-t1,3), round((float(buf.tell())/(t2-t1)), 2)))
                     
                         
@@ -331,7 +332,7 @@ class S3Cache(Cache):
      
             def _send_buffer(self):
                 '''Schedules a buffer to be sent in a thread by queuing it'''
-                global_logger.debug("_send_buffer: sending part {} to thread pool size: {}, total_size = {}"
+                logger.debug("_send_buffer: sending part {} to thread pool size: {}, total_size = {}"
                              .format(self.part_number, self.buffer.tell(), self.total_size))
                 self.buffer.seek(0)
                 thread_upload_queue.put( (self.mp, self.part_number, self.buffer) )
@@ -339,7 +340,6 @@ class S3Cache(Cache):
 
             def write(self, d):
                 import io
-
 
                 self.buffer.write(d) # Load the requested data into a buffer
                 self.total_size += len(d)
@@ -370,6 +370,9 @@ class S3Cache(Cache):
                     self.mp.complete_upload()
 
                     this.bucket.set_acl(acl, path)
+
+
+                this.put_metadata(self.rel_path, metadata)
 
             def __enter__(self):
                 return self
@@ -476,5 +479,5 @@ class S3Cache(Cache):
 
     
     def __repr__(self):
-        return "S3Cache: bucket={} prefix={} access=...{} ".format(self.bucket, self.prefix, self.access_key[-5:], self.upstream)
+        return "s3://{}/{}".format(self.bucket_name, self.prefix) + (' <- '+str(self.upstream) if self.upstream else '')
        

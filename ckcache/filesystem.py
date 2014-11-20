@@ -5,9 +5,9 @@ Revised BSD License, included in this distribution as LICENSE.txt
 
 import os
 from .  import Cache
-from ..util import copy_file_or_flo, get_logger
-
-from ..identity import Identity
+from . import copy_file_or_flo, get_logger, md5_for_file
+from shutil import rmtree
+from . import NotFoundError
 
 global_logger = get_logger(__name__)
 
@@ -49,13 +49,16 @@ class FsCache(Cache):
         
         self._cache_dir = dir
 
+        if not os.path.isabs(self._cache_dir):
+            raise ConfigurationError("Filesystem cache must have an absolute path. Got: '{}' ".format(self._cache_dir))
+
         self.prefix = prefix
 
 
     ##
 
     def clone(self):
-        return FsCache(dir=self._cache_dir, upstream=self.upstream, prefix=self.prefix, **self.args)
+        return self.__class__(dir=self._cache_dir, upstream=self.upstream, prefix=self.prefix, **self.args)
 
 
     def put(self, source, rel_path, metadata=None):
@@ -67,7 +70,7 @@ class FsCache(Cache):
 
         '''
 
-        if isinstance(rel_path, Identity):
+        if not isinstance(rel_path, basestring):
             rel_path = rel_path.cache_key
 
         sink = self.put_stream(rel_path, metadata=metadata)
@@ -90,7 +93,7 @@ class FsCache(Cache):
         """
         from io import IOBase
 
-        if isinstance(rel_path, Identity):
+        if not isinstance(rel_path, basestring):
             rel_path = rel_path.cache_key
 
         repo_path = os.path.join(self.cache_dir, rel_path.strip("/"))
@@ -206,7 +209,7 @@ class FsCache(Cache):
         p = self.get(rel_path)
         
         if p:
-            from ..util.flo import MetadataFlo
+            from . import MetadataFlo
             return MetadataFlo(open(p),self.metadata(rel_path))
      
         if not self.upstream:
@@ -264,7 +267,7 @@ class FsCache(Cache):
             return abs_path
 
         if self.upstream and propagate:
-            return self.upstream.path(rel_path, **kwargs)
+            return self.upstream.path(rel_path, missing_ok = missing_ok, **kwargs)
 
         if not os.path.exists(abs_path) and missing_ok == False:
             return False
@@ -288,7 +291,10 @@ class FsCache(Cache):
         if rel_path.startswith('meta'):
             return None
 
-        path = self.get(os.path.join('meta',rel_path))
+        try:
+            path = self.get(os.path.join('meta',rel_path))
+        except NotFoundError:
+            return {}
 
         if path and os.path.exists(path):
             try:
@@ -300,7 +306,7 @@ class FsCache(Cache):
             return {}
 
     def has(self, rel_path, md5=None, propagate=True):
-        from ..util import md5_for_file
+        from . import md5_for_file
 
         abs_path = os.path.join(self.cache_dir, rel_path)
 
@@ -327,10 +333,10 @@ class FsCache(Cache):
             self.upstream.remove(rel_path, propagate)    
             
     def clean(self):
-        from ..util import rm_rf
+
         
         global_logger.info("Purging: {} ".format(self.cache_dir))
-        rm_rf(self.cache_dir)
+        rmtree(self.cache_dir)
 
         if self.upstream:
             self.upstream.clean()
@@ -339,7 +345,7 @@ class FsCache(Cache):
     @property
     def cache_dir(self):
 
-        from ..dbexceptions import ConfigurationError
+        from .  import ConfigurationError
 
         cache_dir = os.path.join(self._cache_dir, self.prefix).rstrip('/')
 
@@ -365,9 +371,7 @@ class FsCache(Cache):
 
 
     def __repr__(self):
-        return "FsCache: dir={} upstream=({})".format(self.cache_dir, self.upstream)
-
-
+        return self.cache_dir + (' <- '+str(self.upstream) if self.upstream else '')
 
 
 class FsLimitedCache(FsCache):
@@ -505,7 +509,7 @@ class FsLimitedCache(FsCache):
                         (rel_path, size, time.time()))
             self.database.commit()
         except Exception as e:
-            from  ..dbexceptions import FilesystemError
+            from  .  import FilesystemError
 
             raise FilesystemError("Failed to write to cache database '{}': {}"
                                                .format(self.database_path, e.message))
@@ -545,7 +549,7 @@ class FsLimitedCache(FsCache):
         p = self.get(rel_path, cb=cb)
         
         if p:
-            from ..util.flo import MetadataFlo
+            from . import MetadataFlo
             return MetadataFlo(open(p),self.metadata(rel_path))
      
         if not self.upstream:
@@ -618,7 +622,7 @@ class FsLimitedCache(FsCache):
             rel_path: path relative to the root of the repository
         
         '''
-        if isinstance(rel_path, Identity):
+        if not isinstance(rel_path, basestring):
             rel_path = rel_path.cache_key
 
 
@@ -677,7 +681,7 @@ class FsLimitedCache(FsCache):
                 if self.upstream:
                     self.upstream.close()
         
-        if isinstance(rel_path, Identity):
+        if not isinstance(rel_path, basestring):
             rel_path = rel_path.cache_key
         
         repo_path = os.path.join(self.cache_dir, rel_path.strip('/'))
@@ -817,8 +821,8 @@ class FsCompressionCache(Cache):
     ##
 
     def get_stream(self, rel_path, cb=None):
-        from ..util import bundle_file_type
-        from ..util.flo import MetadataFlo
+
+        from . import MetadataFlo
         import gzip
 
         source = self.upstream.get_stream(self._rename(rel_path))
@@ -826,12 +830,18 @@ class FsCompressionCache(Cache):
         if not source:
             return None
 
-        if bundle_file_type(source) == 'gzip':
-            global_logger.debug("CC returning {} with decompression".format(rel_path))
-            return MetadataFlo(gzip.GzipFile(fileobj=source), source.meta)
-        else:
-            global_logger.debug("CC returning {} with passthrough".format(rel_path))
-            return source
+        ## TODO
+        # To detect compression, hex(struct.unpack('!H',data[0:2])[0]) == '0x1f8b'
+        # So, have to read first two bytes, *then put them back*, which may be hard because
+        # the source may not have seek().
+        # To solve this, maybe create a new wrapper object that can return those bytes on the first read(),
+        # then pass thorugh the rest. Or, add that feature to MetadataFlo
+
+
+        # Or, just assume that it is compressesed, until some code makes this fail.
+        return MetadataFlo(gzip.GzipFile(fileobj=source), source.meta)
+
+
 
     def get(self, rel_path, cb=None):
 
@@ -842,7 +852,7 @@ class FsCompressionCache(Cache):
 
         uc_rel_path = os.path.join('uncompressed',rel_path)
 
-        # The compression cache doesn't ahve storage, so it writes the uncompressed file back to the upstream,
+        # The compression cache doesn't have storage, so it writes the uncompressed file back to the upstream,
         # hoping that it is a real filesystem.
         sink = self.upstream.put_stream(uc_rel_path)
 
@@ -956,6 +966,6 @@ class FsCompressionCache(Cache):
 
 
     def __repr__(self):
-        return "FsCompressionCache: upstream=({})".format(self.upstream)
+        return str(self.upstream) +"#compress"
     
 

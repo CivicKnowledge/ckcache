@@ -2,8 +2,7 @@ __author__ = 'eric'
 
 import unittest
 import os
-
-
+from ckcache import new_cache
 
 class BasicTests(unittest.TestCase):
 
@@ -18,6 +17,8 @@ class BasicTests(unittest.TestCase):
         except OSError:
             pass
 
+    def subpath(self,p):
+        return os.path.join(self.root, p)
 
     def make_test_file(self):
 
@@ -28,14 +29,28 @@ class BasicTests(unittest.TestCase):
 
         with open(testfile, 'w+') as f:
             for i in range(1024):
-                f.write('.' * 1023)
+                f.write(str(i%10) * 1023)
                 f.write('\n')
 
         return testfile
 
+    def new_rand_file(self, path, size=1024):
+
+        dir_ = os.path.dirname(path)
+
+        if not os.path.isdir(dir_):
+            os.makedirs(dir_)
+
+        with open(path, 'w+') as f:
+            for i in range(size):
+                f.write(str(i % 10) * 1024)
+                #f.write('\n')
+
+        return path
+
     def test_basic(self):
 
-        from ambry.cache.filesystem import FsCache, FsLimitedCache
+        from ckcache.filesystem import FsCache, FsLimitedCache
 
 
 
@@ -133,11 +148,10 @@ class BasicTests(unittest.TestCase):
         l1.verify()
 
     def test_basic_prefix(self):
-        from ambry.cache.filesystem import FsCache, FsLimitedCache
+        from ckcache.filesystem import FsCache, FsLimitedCache
 
-        root = self.rc.group('filesystem').root
 
-        cache_dir = os.path.join(root, 'test_prefixes')
+        cache_dir = os.path.join(self.root, 'test_prefixes')
 
         prefix = 'prefix'
 
@@ -152,30 +166,24 @@ class BasicTests(unittest.TestCase):
         self.assertTrue(cache1.has('{}/{}'.format(prefix, 'tf')))
 
     def test_compression(self):
-        from ambry.run import get_runconfig
-        from ambry.cache import new_cache
-        from ambry.util import temp_file_name, md5_for_file, copy_file_or_flo
 
-        rc = get_runconfig((os.path.join(self.bundle_dir, 'test-run-config.yaml'), RunConfig.USER_CONFIG))
+        from ckcache import new_cache, md5_for_file, copy_file_or_flo
 
-        comp_cache = new_cache(rc.filesystem('compressioncache'))
+        comp_cache = new_cache(os.path.join(self.root, 'compressioncache#compress'))
+
+        print comp_cache
 
         test_file_name = 'test_file'
 
-        fn = temp_file_name()
-        print 'orig file ', fn
-        with open(fn, 'wb') as f:
-            for i in range(1000):
-                f.write("{:03d}:".format(i))
-
+        fn = self.make_test_file()
         cf = comp_cache.put(fn, test_file_name)
 
         with open(cf) as stream:
-            from ambry.util.sgzip import GzipFile
+            from ckcache.sgzip import GzipFile
 
             stream = GzipFile(stream)
 
-            uncomp_cache = new_cache(rc.filesystem('fscache'))
+            uncomp_cache = new_cache(os.path.join(self.root,'uncomp'))
 
             uncomp_stream = uncomp_cache.put_stream('decomp')
 
@@ -187,21 +195,25 @@ class BasicTests(unittest.TestCase):
 
         self.assertEquals(md5_for_file(fn), md5_for_file(dcf))
 
+        with comp_cache.get_stream(test_file_name) as f:
+            print len(f.read())
+
+        with uncomp_cache.get_stream('decomp') as f:
+            print len(f.read())
+
+
         os.remove(fn)
 
     def test_md5(self):
-        from ambry.run import get_runconfig
-        from ambry.cache import new_cache
-        from ambry.util import md5_for_file
-        from ambry.cache.filesystem import make_metadata
 
-        rc = get_runconfig((os.path.join(self.bundle_dir, 'test-run-config.yaml'), RunConfig.USER_CONFIG))
+        from ckcache import new_cache, md5_for_file
+        from ckcache.filesystem import make_metadata
 
         fn = self.make_test_file()
 
         md5 = md5_for_file(fn)
 
-        cache = new_cache(rc.filesystem('fscache'))
+        cache = new_cache(os.path.join(self.root, 'fscache'))
 
         cache.put(fn, 'foo1')
 
@@ -209,7 +221,7 @@ class BasicTests(unittest.TestCase):
 
         self.assertEquals(md5, cache.md5('foo1'))
 
-        cache = new_cache(rc.filesystem('compressioncache'))
+        cache = new_cache(os.path.join(self.root, 'compressioncache'))
 
         cache.put(fn, 'foo2', metadata=make_metadata(fn))
 
@@ -219,125 +231,15 @@ class BasicTests(unittest.TestCase):
 
         os.remove(fn)
 
-    def test_configed_caches(self):
-        '''Basic test of put(), get() and has() for all cache types'''
-        from functools import partial
-        from ambry.run import get_runconfig, RunConfig
-        from ambry.filesystem import Filesystem
-        from ambry.cache import new_cache
-        from ambry.util import md5_for_file
-        from ambry.bundle import DbBundle
-
-        fn = self.bundle.database.path
-
-        # Opening the file might run the database updates in
-        # database.sqlite._on_connect_update_schema, which can affect the md5.
-        b = DbBundle(fn)
-
-        md5 = md5_for_file(fn)
-
-        for i, fsname in enumerate(['fscache', 'limitedcache', 'compressioncache',
-                                    'cached-s3', 'cached-compressed-s3']):
-
-            config = self.rc.filesystem(fsname)
-            cache = new_cache(config)
-            print '---', fsname, cache
-            identity = self.bundle.identity
-
-            relpath = identity.cache_key
-
-            r = cache.put(fn, relpath, identity.to_meta(md5=md5))
-
-            r = cache.get(relpath)
-
-            if not r.startswith('http'):
-                self.assertTrue(os.path.exists(r), 'Not a url: {}: {}'.format(r, str(cache)))
-
-            self.assertTrue(cache.has(relpath, md5=md5))
-
-            clone = cache.clone()
-
-            self.assertTrue(clone.has(relpath, md5=md5), '{}'.format(type(clone)))
-
-            cache.remove(relpath, propagate=True)
-
-            self.assertFalse(os.path.exists(r), str(cache))
-
-            self.assertFalse(cache.has(relpath))
-            self.assertFalse(clone.has(relpath))
-
-        cache = new_cache(self.rc.filesystem('s3cache-noupstream'))
-        r = cache.put(fn, 'a')
-
-    def test_url_caches(self):
-        from ambry.util import rm_rf
-
-        root = self.rc.group('filesystem').root
-
-        rm_rf(root)
-
-        l = self.get_library('remoted')
-
-        print l.info
-
-        r = l.put_bundle(self.bundle)
-
-        def cb(what, metadata, start):
-            print "PUSH ", what, metadata['name'], start
-
-        for remote in l.remotes[0:3]:
-
-            # This really should use update(), but it throws inscrutable exceptions.
-            for f in l.files.query.state('pushed').all:
-                f.state = 'new'
-                l.files.merge(f)
-
-            print 'Pushing to ', remote
-            l.push(cb=cb, upstream=remote)
-
-        l.purge()  # Remove the entries from the library
-
-        l.sync_remotes(remotes=l.remotes[0:3])
-
-        r = l.resolve(self.bundle.identity.vid)
-
-        self.assertEquals('diEGPXmDC8001', str(r.vid))
-
-        r = l.resolve(self.bundle.partitions.all[0].identity.vid)
-
-        self.assertEquals('diEGPXmDC8001', str(r.vid))
-        self.assertEquals('piEGPXmDC8001001', str(r.partition.vid))
-
-        r = l.locate(self.bundle.identity.vid)
-
-    def x_test_url_caches_2(self):
-
-        l = self.get_library('remoted')
-
-        ident, r = l.locate(self.bundle.identity.vid)
-
-        print ident
-
-        b = r.get(ident.cache_key)
-
-        print b
-
-        print l.locate_one(self.bundle.identity.vid)
-        print l.locate_one('dfoobar')
-
     def test_attachment(self):
-        from ambry.cache import new_cache
-        from shutil import rmtree
+        from ckcache import new_cache
 
-        root = self.rc.group('filesystem').root
 
-        rmtree(root)
+        testfile = self.new_rand_file(os.path.join(self.root, 'testfile'))
 
-        testfile = self.new_rand_file(os.path.join(root, 'testfile'))
+        fs1 = new_cache(dict(dir=os.path.join(self.root, 'fs1')))
 
-        fs1 = new_cache(dict(dir=os.path.join(root, 'fs1')))
-
-        fs3 = new_cache(dict(dir=os.path.join(root, 'fs3')))
+        fs3 = new_cache(dict(dir=os.path.join(self.root, 'fs3')))
 
         fs3.put(testfile, 'tf')
         self.assertTrue(fs3.has('tf'))
@@ -365,20 +267,15 @@ class BasicTests(unittest.TestCase):
         self.assertTrue(fs1.has('tf'))
 
     def test_multi_cache(self):
-        from ambry.cache import new_cache
-        from ambry.cache.multi import MultiCache
-        from ambry.bundle import DbBundle
-        from shutil import rmtree
+        from ckcache import new_cache
+        from ckcache.multi import MultiCache
 
-        root = self.rc.group('filesystem').root
 
-        rmtree(root)
+        testfile = self.new_rand_file(os.path.join(self.root, 'testfile'), size=2)
 
-        testfile = self.new_rand_file(os.path.join(root, 'testfile'), size=2)
-
-        fs1 = new_cache(dict(dir=os.path.join(root, 'fs1')))
-        fs2 = new_cache(dict(dir=os.path.join(root, 'fs2')))
-        fs3 = new_cache(dict(dir=os.path.join(root, 'fs3')))
+        fs1 = new_cache(dict(dir=os.path.join(self.root, 'fs1')))
+        fs2 = new_cache(dict(dir=os.path.join(self.root, 'fs2')))
+        fs3 = new_cache(dict(dir=os.path.join(self.root, 'fs3')))
 
         caches = [fs1, fs2, fs3]
 
@@ -395,8 +292,8 @@ class BasicTests(unittest.TestCase):
         self.assertIn('fs1', ls)
         self.assertIn('fs3', ls)
 
-        self.assertIn('/tmp/cache-test/fs1', ls['fs1']['caches'])
-        self.assertIn('/tmp/cache-test/fs3', ls['fs1']['caches'])
+        self.assertIn('/tmp/ckcache-test/fs1', ls['fs1']['caches'])
+        self.assertIn('/tmp/ckcache-test/fs3', ls['fs1']['caches'])
 
         mc2 = MultiCache([fs1, fs2])
         ls = mc2.list()
@@ -417,62 +314,16 @@ class BasicTests(unittest.TestCase):
         self.assertIn('fs1', ls)
         self.assertIn('fs3', ls)
 
-        l = self.get_library('remoted')
-
-        mc = MultiCache(l.remotes)
-
-        kc = 'source/dataset-subset-variation-0.0.1.db'
-
-        print mc.list()
-
-        self.assertIn(kc, mc.list())
-
-        # Check that has() propagates
-
-        tc = new_cache(dict(dir=os.path.join(root, 'tc1')))
-
-        tc.attach(mc)
-
-        self.assertIn('s3:devtest.sandiegodata.org/cache-compressed', tc.list().values()[0]['caches'])
-
-        self.assertIn(kc, tc.list())
-
-        self.assertTrue(tc.has(kc))
-
-        self.assertFalse(tc.has(kc, propagate=False))
-
-        # Get the object, then check that it persists in the
-        # top level cache
-
-        bp = tc.get(kc)
-
-        b = DbBundle(bp)
-        self.assertEquals('diEGPXmDC8001', DbBundle(bp).identity.vid)
-
-        self.assertIn('/tmp/cache-test/tc1', tc.list()[kc]['caches'])
-        self.assertIn('s3:devtest.sandiegodata.org/cache-compressed', tc.list()[kc]['caches'])
-
-        tc.detach()
-        self.assertTrue(tc.has(kc))
-        self.assertTrue(tc.has(kc, propagate=False))
-
-        self.assertIn('/tmp/cache-test/tc1', tc.list()[kc]['caches'])
-        self.assertNotIn('s3:devtest.sandiegodata.org/cache-compressed', tc.list()[kc]['caches'])
 
     def test_alt_cache(self):
-        from ambry.cache import new_cache
-        from ambry.cache.multi import AltReadCache
-        from ambry.bundle import DbBundle
-        from shutil import rmtree
 
-        root = self.rc.group('filesystem').root
-        print root
-        rmtree(root)
+        from ckcache.multi import AltReadCache
 
-        testfile = self.new_rand_file(os.path.join(root, 'testfile'), size=2)
 
-        fs1 = new_cache(dict(dir=os.path.join(root, 'fs1')))
-        fs2 = new_cache(dict(dir=os.path.join(root, 'fs2')))
+        testfile = self.new_rand_file(os.path.join(self.root, 'testfile'), size=2)
+
+        fs1 = new_cache(dict(dir=os.path.join(self.root, 'fs1')))
+        fs2 = new_cache(dict(dir=os.path.join(self.root, 'fs2')))
 
         fs2.put(testfile, 'fs2', {'foo': 'bar'})
 
@@ -481,9 +332,9 @@ class BasicTests(unittest.TestCase):
 
         arc = AltReadCache(fs1, fs2)
         self.assertTrue(arc.has('fs2'))
-        self.assertEquals(['/tmp/cache-test/fs2'], arc.list()['fs2']['caches'])
+        self.assertEquals(['/tmp/ckcache-test/fs2'], arc.list()['fs2']['caches'])
 
-        self.assertEquals('/tmp/cache-test/fs1/fs2', arc.get('fs2'))
+        self.assertEquals('/tmp/ckcache-test/fs1/fs2', arc.get('fs2'))
 
         # Now the fs1 cache should have the file too
         self.assertTrue(fs1.has('fs2'))
@@ -491,11 +342,48 @@ class BasicTests(unittest.TestCase):
 
         self.assertIn('foo', fs1.metadata('fs2'))
 
-    def test_http_cache(self):
+    def test_accounts(self):
 
-        from ambry.cache.remote import HttpCache
+        config = dict(
+            dir = self.subpath('ta_d1'),
+            upstream = dict(
+                dir = self.subpath('ta_d2'),
+                upstream = 's3://devtest.sandiegodata.org/test'
+            )
+        )
 
-        c = HttpCache('http://devtest.sandiego')
+        c =  new_cache(config)
+
+        with c.put_stream('foobar',metadata=dict(foo='bar')) as f:
+            f.write("bar baz")
+
+    def test_http(self):
+
+        http_cache = new_cache('http://devtest.sandiegodata.org/jdoc')
+
+        self.assertTrue(bool(http_cache.has('library.json')))
+        self.assertFalse(http_cache.has('missing'))
+
+        with http_cache.get_stream('library.json') as f:
+            import json
+            d = json.load(f)
+
+            self.assertIn('bundles', d.keys())
+
+        file_cache = new_cache(os.path.join(self.root,'fc'))
+        file_cache.upstream = http_cache
+
+        self.assertTrue(bool(file_cache.has('library.json')))
+        self.assertFalse(file_cache.has('missing'))
+
+        with file_cache.get_stream('library.json') as f:
+            import json
+
+            d = json.load(f)
+
+            self.assertIn('bundles', d.keys())
+
+
 
 
 if __name__ == '__main__':

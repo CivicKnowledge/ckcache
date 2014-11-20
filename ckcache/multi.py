@@ -5,7 +5,7 @@ Copyright (c) 2013 Clarinova. This file is licensed under the terms of the
 Revised BSD License, included in this distribution as LICENSE.txt
 """
 
-from . import  NullCache, PassthroughCache
+from . import  Cache, NullCache, PassthroughCache
 
 class MultiCache(Cache):
     """Read and write to multiple underlying caches"""
@@ -31,15 +31,16 @@ class MultiCache(Cache):
     def get_stream(self, rel_path, cb=None):
         return self.first_has(rel_path).get_stream(rel_path, cb=cb)
 
+
     def has(self, rel_path, md5=None, propagate=True):
         return self.first_has(rel_path).has(rel_path, md5=md5, propagate=propagate)
 
-    def first_has(self, rel_path, md5=None):
+    def first_has(self, rel_path, md5=None, propagate=True):
 
         assert self.upstreams # Why have multi if there are no upstreams?
 
-        for upstream in self.upstreams:
-            h = upstream.has(rel_path, md5=md5)
+        for upstream in self.upstreams: # Always propagate
+            h = upstream.has(rel_path, md5=md5, propagate=propagate)
             if h:
                 return upstream
 
