@@ -54,7 +54,7 @@ class HttpCache( Cache):
 
     @property
     def repo_id(self):
-        return self.api.url('')
+        return self.url('')
 
     def path(self, rel_path, **kwargs):
 
