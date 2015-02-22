@@ -442,8 +442,6 @@ class S3Cache(Cache):
         return l
 
 
-
-
     def has(self, rel_path, md5=None, propagate=True):
 
         k = self._get_boto_key(rel_path)

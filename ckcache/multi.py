@@ -109,8 +109,6 @@ class AltReadCache(PassthroughCache):
         super(AltReadCache, self).__init__(upstream)
         self.alternate = alternate
 
-
-
     def has(self, rel_path, md5=None, propagate=True):
 
         ush = self.upstream.has(rel_path, md5, propagate)
@@ -176,3 +174,4 @@ class AltReadCache(PassthroughCache):
     def get_stream(self, rel_path, cb=None):
         self._copy_across(rel_path, cb)
         return self.upstream.get_stream(rel_path, cb)
+

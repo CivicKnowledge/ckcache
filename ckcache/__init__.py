@@ -135,6 +135,7 @@ def parse_cache_string(cstr, root_dir='no_root_dir'):
 
     config['options'] = []
 
+
     if scheme == 'file' or not bool(scheme) :
         config['dir'] = parts.path
 
@@ -477,18 +478,11 @@ class NullCache(Cache):
     def has(self, rel_path, md5=None, propagate=True):
         return False
 
+class SimpleFlo(object):
+    '''Base for File Like Objects'''
 
-class MetadataFlo(object):
-    '''A File like object wrapper that has a slot for storing metadata'''
-
-
-    def __init__(self,o, metadata=None):
+    def __init__(self, o):
         self.o = o
-
-        if metadata:
-            self.meta = metadata
-        else:
-            self.meta = {}
 
     def seek(self,offset,whence=0):
         return self.o.seek(offset,whence)
@@ -497,6 +491,7 @@ class MetadataFlo(object):
         return self.o.tell()
 
     def read(self,size=None):
+
         if size:
             return self.o.read(size)
         else:
@@ -530,6 +525,21 @@ class MetadataFlo(object):
     def closed(self):
         return self.o.closed
 
+
+
+class MetadataFlo(SimpleFlo):
+    '''A File like object wrapper that has a slot for storing metadata'''
+
+
+    def __init__(self, o, metadata=None):
+
+        super(MetadataFlo, self).__init__(o)
+
+        if metadata:
+            self.meta = metadata
+        else:
+            self.meta = {}
+
     def __enter__(self):
         return self
 
@@ -538,6 +548,31 @@ class MetadataFlo(object):
             return False
 
         self.close()
+
+class FallbackFlo(object):
+    '''Try one FLO, and if that doesn't work, try another. '''
+
+
+    def __init__(self, o1, o2):
+        self.o1 = o1
+        self.o2 = o2
+
+    methods = "seek tell read readlines write writelines flush close closed".split(' ')
+
+    def __getattr__(self, name):
+        from functools import partial
+
+        if name not in self.methods:
+            raise AttributeError("No property {}".format(name))
+
+        def fallback(name, *args, **kwargs):
+
+            try:
+                return getattr(self.o1,name)(*args, **kwargs)
+            except IOError:
+                return getattr(self.o2, name)(*args, **kwargs)
+
+        return partial(fallback, name)
 
 
 # from https://github.com/kennethreitz/requests/issues/465
@@ -624,6 +659,14 @@ class FileLikeFromIter(object):
 
         self._iter.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type_, value, traceback):
+        if type_:
+            return False
+
+        self.close()
 
 
 def copy_file_or_flo(input_, output, buffer_size=64*1024, cb=None):
@@ -656,7 +699,9 @@ def copy_file_or_flo(input_, output, buffer_size=64*1024, cb=None):
         def copyfileobj(fsrc, fdst, length=buffer_size):
             cumulative = 0
             while 1:
+
                 buf = fsrc.read(length)
+
                 if not buf:
                     break
                 fdst.write(buf)

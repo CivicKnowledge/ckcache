@@ -284,7 +284,6 @@ class FsCache(Cache):
 
         return md5_for_file(abs_path)
 
-
     def metadata(self,rel_path):
         import json
 
@@ -821,6 +820,7 @@ class FsCompressionCache(Cache):
     ##
 
     def get_stream(self, rel_path, cb=None):
+        from ckcache import FallbackFlo
 
         from . import MetadataFlo
         import gzip
@@ -830,16 +830,10 @@ class FsCompressionCache(Cache):
         if not source:
             return None
 
-        ## TODO
-        # To detect compression, hex(struct.unpack('!H',data[0:2])[0]) == '0x1f8b'
-        # So, have to read first two bytes, *then put them back*, which may be hard because
-        # the source may not have seek().
-        # To solve this, maybe create a new wrapper object that can return those bytes on the first read(),
-        # then pass thorugh the rest. Or, add that feature to MetadataFlo
+        # The fallback will try to access the stream without compresion if the compression read fails
 
-
-        # Or, just assume that it is compressesed, until some code makes this fail.
-        return MetadataFlo(gzip.GzipFile(fileobj=source), source.meta)
+        return MetadataFlo( FallbackFlo(gzip.GzipFile(fileobj=source), source),
+                           source.meta)
 
 
 

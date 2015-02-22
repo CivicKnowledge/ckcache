@@ -384,6 +384,53 @@ class BasicTests(unittest.TestCase):
             self.assertIn('bundles', d.keys())
 
 
+    def test_http_compressed(self):
+        from ckcache import  copy_file_or_flo
+
+        http_cache = new_cache('http://s3.sandiegodata.org/library')
+
+        for x in  http_cache.list().keys():
+            if 'example' in x:
+                print x
+
+        x  = http_cache.get_stream('example.com/random-0.0.2.db').__enter__()
+
+        with http_cache.get_stream('example.com/random-0.0.2.db') as f:
+
+            with open('/tmp/foo.db', 'wb') as fout:
+                copy_file_or_flo(f, fout)
+
+
+    def test_fallback(self):
+        from ckcache import FallbackFlo
+        import gzip
+
+        o1 = new_cache(os.path.join(self.root,'o1'))
+        o2 = new_cache(os.path.join(self.root, 'o2'))
+
+        testfile = self.make_test_file()
+
+        if not os.path.exists(o1._cache_dir):
+            os.makedirs(o1._cache_dir)
+
+        o1.put(testfile,'x')
+        o2.put(testfile, 'x')
+
+        with self.assertRaises(IOError):
+            with gzip.GzipFile(fileobj=o1.get_stream('x')) as f:
+                print f.read()
+
+        ff = FallbackFlo(gzip.GzipFile(fileobj=o1.get_stream('x')), o2.get_stream('x'))
+
+        self.assertEquals(1048576,  len(ff.read()))
+
+        ff = FallbackFlo(gzip.GzipFile(fileobj=o1.get_stream('x')), gzip.GzipFile(fileobj=o2.get_stream('x')))
+
+        with self.assertRaises(IOError):
+            self.assertEquals(1048576, len(ff.read()))
+
+
+
 
 
 if __name__ == '__main__':
