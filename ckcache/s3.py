@@ -109,7 +109,7 @@ class S3Cache(Cache):
             k = self._get_boto_key(rel_path, validate = not missing_ok)
 
             if not k:
-                from ..dbexceptions import NotFoundError
+                from ckcache import NotFoundError
                 raise NotFoundError("Didn't find key for bucket='{}' prefix='{}', path='{}' ".format(self.bucket_name, self.prefix, rel_path))
 
             if kwargs.get('public_url', False):

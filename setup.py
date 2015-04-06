@@ -55,7 +55,7 @@ setup(
     install_requires=requires,
     author=ckcache.__author__,
     author_email='eric@sandiegodata.org',
-    url='',
+    url='https://github.com/CivicKnowledge/ckcache',
     license='LICENSE',
     classifiers=classifiers,
 )

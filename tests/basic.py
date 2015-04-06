@@ -52,8 +52,6 @@ class BasicTests(unittest.TestCase):
 
         from ckcache.filesystem import FsCache, FsLimitedCache
 
-
-
         l1_repo_dir = os.path.join(self.root, 'repo-l1')
         os.makedirs(l1_repo_dir)
         l2_repo_dir = os.path.join(self.root, 'repo-l2')
@@ -201,6 +199,11 @@ class BasicTests(unittest.TestCase):
         with uncomp_cache.get_stream('decomp') as f:
             print len(f.read())
 
+
+        with comp_cache.put_stream('comp2') as s:
+            copy_file_or_flo(fn, s)
+
+        self.assertTrue(comp_cache.has('comp2'))
 
         os.remove(fn)
 
@@ -357,6 +360,9 @@ class BasicTests(unittest.TestCase):
         with c.put_stream('foobar',metadata=dict(foo='bar')) as f:
             f.write("bar baz")
 
+
+        self.assertTrue(c.has('foobar'))
+
     def test_http(self):
 
         http_cache = new_cache('http://devtest.sandiegodata.org/jdoc')
@@ -430,7 +436,54 @@ class BasicTests(unittest.TestCase):
             self.assertEquals(1048576, len(ff.read()))
 
 
+    def test_delay(self):
+        from ckcache import parse_cache_string, new_cache, copy_file_or_flo
 
+        testfile = self.new_rand_file(os.path.join(self.root, 'testfile'), size=20)
+
+        config = parse_cache_string('/tmp/ckcache-test/logging#log')
+
+        cache  = new_cache(config)
+
+        print cache
+
+        for i in range(1,5):
+            rel_path = 'async_iter/{}'.format(i)
+            with cache.put_stream(rel_path) as f:
+                copy_file_or_flo(testfile, f)
+                print "Wrote to", rel_path
+
+        #self.assertTrue(cache.has(rel_path))
+
+        #print cache.path(rel_path)
+        #print cache.upstream.path(rel_path)
+
+        #cache.remove(rel_path)
+
+        #self.assertFalse(cache.has(rel_path))
+
+        for e in cache.list_log():
+            print e.path, e.time, e.cache
+            e.remove()
+
+    def test_dict(self):
+        from ckcache import parse_cache_string, new_cache, copy_file_or_flo
+        from ckcache.dictionary import DictCache
+
+        testfile = self.new_rand_file(os.path.join(self.root, 'testfile'), size=20)
+
+        base_cache = new_cache('/tmp/ckcache-test/dict#log')
+
+        d = DictCache(base_cache)
+
+        d[1] = ['one', 1]
+        d[2] = ['two', 2]
+        d[3] = ['three', 3]
+
+        print d[1]
+
+        for x in d:
+            print x, d[x][0]
 
 
 if __name__ == '__main__':

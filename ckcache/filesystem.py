@@ -1,5 +1,5 @@
 """
-Copyright (c) 2013 Clarinova. This file is licensed under the terms of the
+Copyright (c) 2015 Civic Knowledge. This file is licensed under the terms of the
 Revised BSD License, included in this distribution as LICENSE.txt
 """
 
@@ -70,6 +70,7 @@ class FsCache(Cache):
 
         '''
 
+        # This case should probably be deprecated.
         if not isinstance(rel_path, basestring):
             rel_path = rel_path.cache_key
 
@@ -228,11 +229,16 @@ class FsCache(Cache):
 
         l = {}
 
+        if not path:
+            start_path = self.cache_dir
+        else:
+            start_path = os.path.join(self.cache_dir, path)
 
-        for root, dirs, files in os.walk(self.cache_dir):
+        for root, dirs, files in os.walk(start_path):
+
             root = root.replace(self.cache_dir,'',1).strip('/')
 
-            if root.startswith('meta'):
+            if root.startswith('meta') or root.startswith('_'):
                 continue
 
             if not include_partitions and root.count('/') > 0:
@@ -810,10 +816,20 @@ class FsCompressionCache(Cache):
 
         sink = self.upstream.put_stream(self._rename(rel_path),  metadata=metadata, cb=None)
 
-
         self.put_metadata(rel_path, metadata)
 
-        return gzip.GzipFile(fileobj=sink,  mode='wb')
+        class flo(gzip.GzipFile):
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, type_, value, traceback):
+                if type_:
+                    return False
+
+                self.close()
+
+        return flo(fileobj=sink,  mode='wb')
 
     ##
     ## Get

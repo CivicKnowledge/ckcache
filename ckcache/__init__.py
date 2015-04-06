@@ -5,9 +5,10 @@ Copyright 2014, Civic Knowledge. All Rights Reserved
 import os
 import logging
 import sys
+import threading
 
 
-__version__ = 0.1
+__version__ = '0.1.1'
 __author__ = "Eric Busboom <eric@civicknowledge.com>"
 
 account_files = [
@@ -104,20 +105,27 @@ def new_cache(config, root_dir='no_root_dir'):
         if 'upstream' in config:
             config['upstream'] = new_cache(config['upstream'], root_dir=root_dir)
 
-        if 'options' in config and 'compress' in config['options'] :
-            # Need to clone the config because we don't want to propagate the changes
-            try:
-                cc = config.to_dict()
-            except AttributeError:
-                cc = dict(config.items())
-
-            cc['options'] = [ i for i in config['options'] if i !=  'compress']
-            from filesystem import FsCompressionCache
-            return FsCompressionCache(upstream=cc)
-
+        if 'options' in config:
+            options = config['options']
         else:
-            return  fsclass(**dict(config))
+            options = []
 
+        cache = fsclass(**dict(config))
+
+        if 'compress' in options:
+            from filesystem import FsCompressionCache
+            cache = FsCompressionCache(upstream=cache)
+
+
+        if 'async' in options:
+            from async import ThreadedWriteCache
+            cache = ThreadedWriteCache(upstream=cache)
+
+        if 'log' in options:
+            from async import LoggingCache
+            cache = LoggingCache(upstream=cache)
+
+        return cache
 
 def parse_cache_string(cstr, root_dir='no_root_dir'):
     import urlparse
@@ -134,7 +142,6 @@ def parse_cache_string(cstr, root_dir='no_root_dir'):
     config['type'] = scheme = parts.scheme if parts.scheme else 'file'
 
     config['options'] = []
-
 
     if scheme == 'file' or not bool(scheme) :
         config['dir'] = parts.path
