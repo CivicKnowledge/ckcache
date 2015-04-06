@@ -47,7 +47,7 @@ classifiers = [
 setup(
     name='ckcache',
     version=ckcache.__version__,
-    description='Common interface to a variety of object storate systems',
+    description='Common interface to a variety of object storage systems',
     long_description=readme,
     packages=packages,
     package_data=package_data,
