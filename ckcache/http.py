@@ -1,19 +1,21 @@
-from . import   Cache
+from . import Cache
 import requests
 from . import NotFoundError
 
-class HttpCache( Cache):
+
+class HttpCache(Cache):
+
     """Cache that uses HTTP protocol. Similar to a read-only version of the S3 cache, except that the
     list() method requires that a special file, meta/_list.json be put to the source"""
 
-    def __init__(self,  url, **kwargs):
+    def __init__(self, url, **kwargs):
         self._url = url
 
     def _rename(self, rel_path):
         '''Remove the .gz suffix that may have been added by a compression cache.
         In s3, compression is indicated by the content encoding.  '''
         import re
-        rel_path =  re.sub('\.gz$','',rel_path)
+        rel_path = re.sub('\.gz$', '', rel_path)
         return rel_path
 
     def url(self, u, *args, **kwargs):
@@ -40,7 +42,9 @@ class HttpCache( Cache):
                 raise e
 
             if 400 <= r.status_code < 500:
-                raise NotFoundError("Failed to find resource for URL: {}".format(r.url))
+                raise NotFoundError(
+                    "Failed to find resource for URL: {}".format(
+                        r.url))
 
             r.raise_for_status()
 
@@ -62,7 +66,6 @@ class HttpCache( Cache):
 
     def get(self, rel_path, cb=None):
         raise NotImplementedError()
-
 
     def get_stream(self, rel_path, cb=None):
 
@@ -91,7 +94,6 @@ class HttpCache( Cache):
 
         return response
 
-
     def has(self, rel_path, md5=None, propagate=True):
 
         try:
@@ -104,24 +106,27 @@ class HttpCache( Cache):
         except NotFoundError:
             return False
 
+    def put(self, source, rel_path, metadata=None):
+        raise NotImplementedError()
 
-    def put(self, source, rel_path, metadata=None): raise NotImplementedError()
+    def put_stream(self, rel_path, metadata=None, cb=None):
+        raise NotImplementedError()
 
-    def put_stream(self,rel_path, metadata=None, cb=None): raise NotImplementedError()
+    def put_metadata(self, rel_path, metadata):
+        raise NotImplementedError()
 
-    def put_metadata(self,rel_path, metadata): raise NotImplementedError()
-
-    def metadata(self,rel_path):
+    def metadata(self, rel_path):
 
         rel_path = self._rename(rel_path)
 
-        import json, os
+        import json
+        import os
 
         if rel_path.startswith('meta'):
             return {}
 
         try:
-            strm = self.get_stream(os.path.join('meta',rel_path))
+            strm = self.get_stream(os.path.join('meta', rel_path))
         except NotFoundError:
             return {}
 
@@ -132,36 +137,49 @@ class HttpCache( Cache):
                     return {}
                 return json.loads(s)
             except ValueError as e:
-                raise ValueError("Failed to decode json for key '{}',  {}. {}".format(rel_path, self.path(os.path.join('meta',rel_path)), strm))
+                raise ValueError(
+                    "Failed to decode json for key '{}',  {}. {}".format(
+                        rel_path,
+                        self.path(
+                            os.path.join(
+                                'meta',
+                                rel_path)),
+                        strm))
         else:
             return {}
 
-    def remove(self,rel_path, propagate = False): raise NotImplementedError()
+    def remove(self, rel_path, propagate=False):
+        raise NotImplementedError()
 
-    def find(self,query): raise NotImplementedError()
+    def find(self, query):
+        raise NotImplementedError()
 
-    def clean(self): raise NotImplementedError()
+    def clean(self):
+        raise NotImplementedError()
 
-    def list(self, path=None,with_metadata=True, include_partitions=True):
+    def list(self, path=None, with_metadata=True, include_partitions=True):
 
         r = requests.get(self.url('meta/_list.json'), params={})
         self.handle_status(r)
 
-        l =  self.handle_return(r)
+        l = self.handle_return(r)
 
         if not l:
 
-            raise NotFoundError("Did not find _list.json file at {}".format(self.path('_list.json')))
+            raise NotFoundError(
+                "Did not find _list.json file at {}".format(
+                    self.path('_list.json')))
 
         if not isinstance(l, dict):
             l = l.json()
 
-        return { k:{} for k in l }
+        return {k: {} for k in l}
 
+    def attach(self, upstream):
+        raise NotImplementedError()
 
-
-    def attach(self,upstream): raise NotImplementedError()
-    def detach(self): raise NotImplementedError()
+    def detach(self):
+        raise NotImplementedError()
 
     def set_priority(self, i):
         self._priority = self.base_priority + i
@@ -170,10 +188,8 @@ class HttpCache( Cache):
     def priority(self):
         return self._priority
 
-
-    def last_upstream(self): raise NotImplementedError()
+    def last_upstream(self):
+        raise NotImplementedError()
 
     def __repr__(self):
         return "HttpCache: url={}".format(self.url(''))
-
-

@@ -6,15 +6,15 @@ Copyright (c) 2015 Civic Knowledge. This file is licensed under the terms of the
 Revised BSD License, included in this distribution as LICENSE.txt
 """
 
-from . import Cache, PassthroughCache
+from . import PassthroughCache
 from collections import MutableMapping
 import json
 
+
 class DictCache(PassthroughCache, MutableMapping):
 
-    def __init__(self, upstream,**kwargs):
+    def __init__(self, upstream, **kwargs):
         super(DictCache, self).__init__(upstream)
-
 
     def make_key(self, key):
         # Turn tuples in to heirarchical keys
@@ -22,7 +22,6 @@ class DictCache(PassthroughCache, MutableMapping):
             return '/'.join(str(x) for x in key)
         else:
             return str(key)
-
 
     def __setitem__(self, key, value):
         from cStringIO import StringIO
@@ -36,7 +35,6 @@ class DictCache(PassthroughCache, MutableMapping):
         s.close()
 
     def __getitem__(self, key):
-        from cStringIO import StringIO
 
         key = self.make_key(key)
 
