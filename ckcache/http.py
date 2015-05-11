@@ -97,7 +97,7 @@ class HttpCache(Cache):
     def has(self, rel_path, md5=None, propagate=True):
 
         try:
-
+            
             r = requests.head(self.url(self._rename(rel_path)), params={})
             self.handle_status(r)
 

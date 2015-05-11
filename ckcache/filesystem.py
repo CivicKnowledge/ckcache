@@ -171,10 +171,7 @@ class FsCache(Cache):
         '''
         import shutil
 
-        global_logger.debug(
-            "FC {} get looking for {}".format(
-                self.repo_id,
-                rel_path))
+        global_logger.debug("FC {} get looking for {}".format(self.repo_id,rel_path))
 
         path = os.path.join(self.cache_dir, rel_path)
 
@@ -184,10 +181,7 @@ class FsCache(Cache):
             if not os.path.isfile(path):
                 raise ValueError("Path does not point to a file")
 
-            global_logger.debug(
-                "FC {} get {} found ".format(
-                    self.repo_id,
-                    path))
+            global_logger.debug( "FC {} get {} found ".format(self.repo_id,path))
             return path
 
         if not self.upstream:

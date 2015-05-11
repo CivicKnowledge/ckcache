@@ -32,8 +32,9 @@ class S3Cache(Cache):
         self.access_key = account['access']
         self.secret = account['secret']
 
+
         self.conn = S3Connection(self.access_key, self.secret, is_secure=False)
-        self.bucket = self.conn.get_bucket(self.bucket_name)
+        self._bucket = None
 
         self.options = options
 
@@ -54,6 +55,13 @@ class S3Cache(Cache):
             upstream=self.upstream,
             cdn=self.cdn,
             **self.args)
+
+    @property
+    def bucket(self):
+        if not self._bucket:
+            self._bucket = self.conn.get_bucket(self.bucket_name)
+
+        return self._bucket
 
     def _init_cdn(self, config):
         import boto
@@ -218,7 +226,6 @@ class S3Cache(Cache):
             "Can't get() from an S3, since it has no place to put a file. Wrap with an FsCache. ")
 
     def _get_boto_key(self, rel_path, validate=True):
-        from boto.s3.key import Key
 
         rel_path = self._rename(rel_path)
         path = self._prefix(rel_path)
@@ -445,6 +452,7 @@ class S3Cache(Cache):
             if path.startswith('_') or path.startswith('meta'):
                 continue
 
+            # TODO 'include_partitions' doesn't make any sense outside of ambry
             if not include_partitions and path.count('/') > 1:
                 continue  # partition files
 
