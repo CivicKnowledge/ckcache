@@ -226,7 +226,6 @@ class S3Cache(Cache):
             "Can't get() from an S3, since it has no place to put a file. Wrap with an FsCache. ")
 
     def _get_boto_key(self, rel_path, validate=True):
-        from boto.s3.key import Key
 
         rel_path = self._rename(rel_path)
         path = self._prefix(rel_path)

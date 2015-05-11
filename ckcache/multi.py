@@ -17,6 +17,7 @@ class MultiCache(Cache):
     def __init__(self, upstreams):
         self.upstreams = upstreams
 
+    @property
     def repo_id(self):
         import hashlib
 
