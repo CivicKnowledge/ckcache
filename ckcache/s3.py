@@ -45,7 +45,6 @@ class S3Cache(Cache):
             self._init_cdn(cdn)
 
     def clone(self):
-        from boto.s3.connection import S3Connection
 
         return S3Cache(
             bucket=self.bucket,
@@ -64,7 +63,7 @@ class S3Cache(Cache):
         return self._bucket
 
     def _init_cdn(self, config):
-        import boto
+
         import time
         from boto.cloudfront import CloudFrontConnection
         from boto.cloudfront.distribution import Distribution
