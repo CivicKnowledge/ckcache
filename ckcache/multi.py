@@ -17,6 +17,7 @@ class MultiCache(Cache):
     def __init__(self, upstreams):
         self.upstreams = upstreams
 
+    @property
     def repo_id(self):
         import hashlib
 
@@ -39,7 +40,7 @@ class MultiCache(Cache):
 
     def first_has(self, rel_path, md5=None, propagate=True):
 
-        assert self.upstreams  # Why have multi if there are no upstreams?
+        #assert self.upstreams  # Why have multi if there are no upstreams?
 
         for upstream in self.upstreams:  # Always propagate
             h = upstream.has(rel_path, md5=md5, propagate=propagate)
@@ -152,6 +153,7 @@ class AltReadCache(PassthroughCache):
         if not self.upstream.has(rel_path):
 
             if not self.alternate.has(rel_path):
+
                 return None
 
             source = self.alternate.get_stream(rel_path)

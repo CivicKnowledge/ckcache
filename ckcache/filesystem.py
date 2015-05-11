@@ -147,7 +147,7 @@ class FsCache(Cache):
                             self._rel_path,
                             metadata=metadata)
 
-            def __enter__(self):
+            def __enter__(self): # Can be used as a context!
                 return self
 
             def __exit__(self, type_, value, traceback):
@@ -727,6 +727,13 @@ class FsLimitedCache(FsCache):
 
                 if self.upstream:
                     self.upstream.close()
+                    
+            def __enter__(self): # Can be used as a context!
+                return self
+
+            def __exit__(self, type_, value, traceback):
+                if type_:
+                    return False
 
         if not isinstance(rel_path, basestring):
             rel_path = rel_path.cache_key
